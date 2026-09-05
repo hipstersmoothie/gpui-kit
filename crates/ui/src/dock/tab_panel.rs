@@ -466,6 +466,7 @@ impl TabGroupSkin {
         }
 
         TabBar::new("tab-bar")
+            .with_size(self.shared.tab_size())
             .track_scroll(&self.scroll_handle)
             .when(has_leading, |this| {
                 this.prefix(

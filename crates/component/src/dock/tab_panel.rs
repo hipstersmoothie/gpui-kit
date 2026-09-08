@@ -28,7 +28,7 @@ use gpui_base::{
 use rust_i18n::t;
 
 use crate::{
-    ActiveTheme as _, IconName, Selectable as _, Sizable as _, Size,
+    ActiveTheme as _, IconName, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     dock::{ClosePanel, PanelControl, PanelHandle, PanelStyle, SkinShared, ToggleZoom},
     h_flex,
@@ -369,13 +369,7 @@ impl TabGroupSkin {
         let title_style = handle.and_then(|handle| handle.title_style(cx));
         let drag = tab_drag(group, ix, cx);
 
-        let title_h = match self.shared.tab_size() {
-            Size::Size(h) => h,
-            Size::XSmall => px(20.),
-            Size::Small => px(24.),
-            Size::Large => px(36.),
-            _ => px(30.),
-        };
+        let title_h = self.shared.resolved_title_bar_height(window.rem_size());
 
         h_flex()
             .justify_between()
@@ -474,7 +468,9 @@ impl TabGroupSkin {
         }
 
         TabBar::new("tab-bar")
-            .with_size(self.shared.tab_size())
+            .when_some(self.shared.tab_bar_height(), |this, height| {
+                this.with_tab_height(height)
+            })
             .track_scroll(&self.scroll_handle)
             .when(has_leading, |this| {
                 this.prefix(
@@ -797,7 +793,6 @@ mod tests {
     };
 
     use super::*;
-    use crate::Size;
     use crate::dock::{
         DockSkin, Panel, panel_handle,
         test_support::{HideableProbe, MeasuredProbe},
@@ -1431,15 +1426,11 @@ mod tests {
         );
     }
 
-    /// A dock skin's tab-size setting has to reach the `TabBar` it builds.
-    ///
-    /// The skin is the only public handle an application has on dock chrome;
-    /// constructing a sized `TabBar` directly does not affect the bars inside a
-    /// `DockArea`. Compare the panel's remaining height before and after the
-    /// setting changes so this test covers the complete path rather than only the
-    /// stored value.
+    /// Dock chrome heights follow the window rem, so a larger type scale does
+    /// not clip tab labels. An explicit [`DockSkin::set_tab_bar_height`] is a
+    /// pixel override on top of that.
     #[gpui::test]
-    fn tab_size_changes_the_height_left_for_panel_content(cx: &mut TestAppContext) {
+    fn tab_bar_height_follows_rem_and_an_explicit_override(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let height = Rc::new(Cell::new(px(0.)));
         let mut skin_handle = None;
@@ -1459,19 +1450,32 @@ mod tests {
         });
         cx.run_until_parked();
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        let medium_content = height.get();
+        let default_content = height.get();
 
-        cx.update(|_, cx| skin.set_tab_size(px(44.), cx));
+        cx.update(|window, _| window.set_rem_size(px(20.)));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let scaled_content = height.get();
+        assert_eq!(
+            default_content - scaled_content,
+            px(8.),
+            "a 20px rem grows the default 32px tab bar to 40px"
+        );
+
+        cx.update(|window, cx| {
+            window.set_rem_size(px(16.));
+            skin.set_tab_bar_height(Some(px(44.)), cx);
+        });
         cx.run_until_parked();
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let custom_content = height.get();
 
-        assert_eq!(skin.tab_size(), Size::Size(px(44.)));
-        assert_eq!(
-            medium_content - custom_content,
-            px(12.),
-            "a 12px taller tab bar must leave 12px less panel content"
-        );
+        assert_eq!(skin.tab_bar_height(), Some(px(44.)));
+        assert_eq!(default_content - custom_content, px(12.));
+        let custom_bar = cx.update(|window, _| window.viewport_size().height - custom_content);
+        let default_bar = cx.update(|window, _| window.viewport_size().height - default_content);
+        assert_eq!(custom_bar, default_bar + px(12.));
+        assert_eq!(custom_bar, px(44.), "the override is an exact pixel height");
     }
 
     /// A collapsed group is a strip of tabs with no content, and the actions

@@ -146,7 +146,10 @@ self.dock_skin.set_panel_style(PanelStyle::default(), cx);
 self.dock_skin.set_toggle_button_visible(true, cx);
 self.dock_skin
     .set_tiles_scrollbar_mode(Some(ScrollbarMode::Auto), cx);
+self.dock_skin.set_tab_bar_height(Some(px(40.)), cx);
 ```
+
+Tab Bar 高度默认跟随窗口 rem（16px rem 时为 32px），因此增大主题字号时 Dock 标签不会被裁切。`set_tab_bar_height` 是可选的像素覆盖，用于让 Chrome 忽略 rem 缩放。
 
 如果需要完全不同的视觉，可以实现 `gpui-base` 的渲染器 traits；同一份布局数据和操作逻辑仍然可以复用。
 

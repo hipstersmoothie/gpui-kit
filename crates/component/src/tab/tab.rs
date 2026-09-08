@@ -20,13 +20,18 @@ pub enum TabVariant {
     Underline,
 }
 
+/// Chrome heights are specified in pixels at the default 16px rem. Scale them
+/// so a larger `window.rem_size()` (theme font / zoom) grows the box with the
+/// rem-based label instead of clipping it.
+pub(crate) const DEFAULT_REM: f32 = 16.;
+
+pub(crate) fn scale_chrome(at_default_rem: Pixels, rem_size: Pixels) -> Pixels {
+    at_default_rem * (f32::from(rem_size) / DEFAULT_REM)
+}
+
 impl TabVariant {
-    fn height(&self, size: Size) -> Pixels {
-        match size {
-            // `Sizable` accepts a pixel value, but tabs previously treated it as
-            // `Medium`. Honor the caller's requested outer height, as the other
-            // sizable components do.
-            Size::Size(height) => height,
+    pub(crate) fn height(&self, size: Size, rem_size: Pixels) -> Pixels {
+        let at_default = match size {
             Size::XSmall => match self {
                 TabVariant::Underline => px(26.),
                 _ => px(20.),
@@ -39,27 +44,18 @@ impl TabVariant {
                 TabVariant::Underline => px(44.),
                 _ => px(36.),
             },
+            // `Size::Size` is not a tab height. Named steps pick padding,
+            // radius, and type; a pixel `Size` has no single meaning here.
             _ => match self {
                 TabVariant::Underline => px(36.),
                 _ => px(32.),
             },
-        }
+        };
+        scale_chrome(at_default, rem_size)
     }
 
-    pub(super) fn inner_height(&self, size: Size) -> Pixels {
-        match size {
-            // Preserve each variant's medium-size inset. The custom value is the
-            // outer height, so the inner surface needs the same relationship to it
-            // as the built-in medium size.
-            Size::Size(height) => {
-                let inset = match self {
-                    TabVariant::Tab => px(2.),
-                    TabVariant::Outline | TabVariant::Pill => px(6.),
-                    TabVariant::Segmented => px(8.),
-                    TabVariant::Underline => px(10.),
-                };
-                (height - inset).max(px(0.))
-            }
+    pub(super) fn inner_height(&self, size: Size, rem_size: Pixels) -> Pixels {
+        let at_default = match size {
             Size::XSmall => match self {
                 TabVariant::Tab | TabVariant::Outline | TabVariant::Pill => px(18.),
                 TabVariant::Segmented => px(16.),
@@ -81,13 +77,13 @@ impl TabVariant {
                 TabVariant::Segmented => px(24.),
                 TabVariant::Underline => px(26.),
             },
-        }
+        };
+        scale_chrome(at_default, rem_size)
     }
 
     /// Default px(12) to match a dock tab bar's px_3
     fn inner_paddings(&self, size: Size) -> Edges<Pixels> {
         let mut padding_x = match size {
-            Size::Size(height) => height * 0.375,
             Size::XSmall => px(8.),
             Size::Small => px(10.),
             Size::Large => px(16.),
@@ -432,6 +428,9 @@ pub struct Tab {
     /// restarts in sync with the indicator slide.
     pub(super) indicator_epoch: u64,
     pub(super) max_width: Option<Pixels>,
+    /// Outer height that bypasses the rem-scaled named-size table. Padding,
+    /// radius, and type still follow [`Self::size`].
+    pub(super) height_override: Option<Pixels>,
     on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
 }
 
@@ -485,6 +484,7 @@ impl Default for Tab {
             variant: TabVariant::default(),
             size: Size::default(),
             max_width: None,
+            height_override: None,
             on_click: None,
         }
     }
@@ -593,6 +593,12 @@ impl Tab {
         self.max_width = max_width;
         self
     }
+
+    /// Set an exact outer height. Named size still controls padding and type.
+    pub(super) fn height_override(mut self, height: Option<Pixels>) -> Self {
+        self.height_override = height;
+        self
+    }
 }
 
 impl ParentElement for Tab {
@@ -634,7 +640,7 @@ impl Sizable for Tab {
 }
 
 impl RenderOnce for Tab {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let mut normal_style = self.variant.normal(cx);
         let mut selected_style = self.variant.selected(cx);
         let mut disabled_style = self.variant.disabled(self.selected, cx);
@@ -662,8 +668,18 @@ impl RenderOnce for Tab {
         let inner_radius = self.variant.inner_radius(self.size, cx);
         let inner_paddings = self.variant.inner_paddings(self.size);
         let inner_margins = self.variant.inner_margins(self.size);
-        let inner_height = self.variant.inner_height(self.size);
-        let height = self.variant.height(self.size);
+        let rem_size = window.rem_size();
+        let (height, inner_height) = match self.height_override {
+            Some(height) => {
+                let inset = self.variant.height(self.size, rem_size)
+                    - self.variant.inner_height(self.size, rem_size);
+                (height, (height - inset).max(px(0.)))
+            }
+            None => (
+                self.variant.height(self.size, rem_size),
+                self.variant.inner_height(self.size, rem_size),
+            ),
+        };
         let aria_label = self.a11y_label();
 
         let segmented_indicator_active =
@@ -975,25 +991,23 @@ mod tests {
     }
 
     #[test]
-    fn custom_size_controls_outer_height_and_scales_horizontal_padding() {
-        let size = Size::Size(px(40.));
-
-        for variant in VARIANTS {
-            assert_eq!(variant.height(size), px(40.));
-            assert!(
-                variant.inner_height(size) <= px(40.),
-                "{variant:?} inner height must fit its outer height"
-            );
-
-            let padding = variant.inner_paddings(size);
-            if variant == TabVariant::Underline {
-                assert_eq!(padding.left, px(0.));
-                assert_eq!(padding.right, px(0.));
-            } else {
-                assert_eq!(padding.left, px(15.));
-                assert_eq!(padding.right, px(15.));
-            }
-        }
+    fn tab_chrome_height_follows_rem_size() {
+        assert_eq!(
+            TabVariant::Tab.height(Size::Medium, px(16.)),
+            px(32.),
+            "medium tabs are 32px at the default rem"
+        );
+        assert_eq!(
+            TabVariant::Tab.height(Size::Medium, px(20.)),
+            px(40.),
+            "a 1.25× rem must grow the box with the label"
+        );
+        assert_eq!(TabVariant::Tab.inner_height(Size::Medium, px(16.)), px(30.));
+        assert_eq!(
+            TabVariant::Tab.inner_paddings(Size::Size(px(40.))).left,
+            px(12.),
+            "a pixel Size is not a height and must not change padding"
+        );
     }
 
     #[gpui::test]

@@ -146,7 +146,10 @@ self.dock_skin.set_panel_style(PanelStyle::default(), cx);
 self.dock_skin.set_toggle_button_visible(true, cx);
 self.dock_skin
     .set_tiles_scrollbar_mode(Some(ScrollbarMode::Auto), cx);
+self.dock_skin.set_tab_bar_height(Some(px(40.)), cx);
 ```
+
+Tab bar height follows the window rem by default (32px at a 16px rem), so raising the theme font does not clip dock tabs. `set_tab_bar_height` is an optional pixel override when the chrome should ignore rem scaling.
 
 For complete control, implement the renderer traits in `gpui-base`. The same layout data and operations can then drive an entirely different Dock style.
 

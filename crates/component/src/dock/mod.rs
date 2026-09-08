@@ -25,9 +25,11 @@ mod tiles;
 
 use std::{cell::Cell, rc::Rc};
 
-use gpui::{App, AppContext as _, Context, Entity, SharedString, WeakEntity, Window, actions};
+use gpui::{
+    App, AppContext as _, Context, Entity, Pixels, SharedString, WeakEntity, Window, actions,
+};
 
-use crate::{Size, scroll::ScrollbarMode};
+use crate::scroll::ScrollbarMode;
 
 /// The behavior half of the panel traits, which every panel implements
 /// alongside [`Panel`]. Exported under this name because `Panel` in this
@@ -49,13 +51,13 @@ pub use gpui_base::dock::PanelView as BasePanelView;
 /// crate and handing it back with a different meaning is worse than dropping
 /// it. A skin reads a dock through [`DockContext`].
 pub use gpui_base::dock::{
-    AnyDrag, DRAG_BAR_HEIGHT, DockArea, DockAreaRenderer, DockAreaState, DockContext, DockEvent,
-    DockLayout, DockPlacement, DockSizing, DockState, DragPanel, DropIndicator,
-    DropPlaceholderBounds, DropTarget, EditResult, HANDLE_SIZE, InsertTarget, NodeId, PaneNode,
-    PaneRef, PaneTree, PanelBuildContext, PanelBuilder, PanelEvent, PanelId, PanelInfo,
-    PanelRegistry, PanelSource, PanelState, ResizeSide, RootKind, TabGroup, TabGroupConstraints,
-    TabGroupContext, TabGroupEvent, TabGroupRenderer, TileContext, TileMeta, TilePanel, TilesEvent,
-    TilesRenderer, TilesState, register_panel,
+    AnyDrag, CLOSED_BOTTOM_STRIP, DRAG_BAR_HEIGHT, DockArea, DockAreaRenderer, DockAreaState,
+    DockContext, DockEvent, DockLayout, DockPlacement, DockSizing, DockState, DragPanel,
+    DropIndicator, DropPlaceholderBounds, DropTarget, EditResult, HANDLE_SIZE, InsertTarget,
+    NodeId, PaneNode, PaneRef, PaneTree, PanelBuildContext, PanelBuilder, PanelEvent, PanelId,
+    PanelInfo, PanelRegistry, PanelSource, PanelState, ResizeSide, RootKind, TabGroup,
+    TabGroupConstraints, TabGroupContext, TabGroupEvent, TabGroupRenderer, TileContext, TileMeta,
+    TilePanel, TilesEvent, TilesRenderer, TilesState, closed_bottom_strip, register_panel,
 };
 pub use panel::*;
 pub use tab_panel::DragPanelPreview;
@@ -82,7 +84,7 @@ pub(crate) fn init(cx: &mut App) {
 pub(crate) struct SkinShared {
     area: WeakEntity<DockArea>,
     panel_style: Cell<PanelStyle>,
-    tab_size: Cell<Size>,
+    tab_bar_height: Cell<Option<Pixels>>,
     toggle_button_visible: Cell<bool>,
     tiles_scrollbar_mode: Cell<Option<ScrollbarMode>>,
     /// The dock whose resize handle is being dragged, if any. Only one can be.
@@ -98,8 +100,20 @@ impl SkinShared {
         self.panel_style.get()
     }
 
-    pub(crate) fn tab_size(&self) -> Size {
-        self.tab_size.get()
+    pub(crate) fn tab_bar_height(&self) -> Option<Pixels> {
+        self.tab_bar_height.get()
+    }
+
+    pub(crate) fn resolved_tab_bar_height(&self, rem_size: Pixels) -> Pixels {
+        self.tab_bar_height
+            .get()
+            .unwrap_or_else(|| crate::tab::TabVariant::Tab.height(crate::Size::Medium, rem_size))
+    }
+
+    pub(crate) fn resolved_title_bar_height(&self, rem_size: Pixels) -> Pixels {
+        self.tab_bar_height
+            .get()
+            .unwrap_or_else(|| crate::tab::scale_chrome(gpui::px(30.), rem_size))
     }
 
     pub(crate) fn is_toggle_button_visible(&self) -> bool {
@@ -167,7 +181,7 @@ impl DockSkin {
             shared: Rc::new(SkinShared {
                 area: cx.weak_entity(),
                 panel_style: Cell::new(PanelStyle::default()),
-                tab_size: Cell::new(Size::default()),
+                tab_bar_height: Cell::new(None),
                 toggle_button_visible: Cell::new(true),
                 tiles_scrollbar_mode: Cell::new(None),
                 resizing_dock: Cell::new(None),
@@ -189,16 +203,17 @@ impl DockSkin {
         self.shared.notify(cx);
     }
 
-    /// The size of full tab bars rendered by the dock.
+    /// The outer height of dock-owned tab bars and single-panel title bars.
     ///
-    /// A pixel value sets an exact outer tab height. The default is
-    /// [`Size::Medium`].
-    pub fn tab_size(&self) -> Size {
-        self.shared.tab_size()
+    /// `None` follows rem-scaled defaults: 32px at a 16px rem for a tab bar,
+    /// 30px for a one-panel title. A pixel value is used as-is, including when
+    /// the window rem changes.
+    pub fn tab_bar_height(&self) -> Option<Pixels> {
+        self.shared.tab_bar_height()
     }
 
-    pub fn set_tab_size(&self, size: impl Into<Size>, cx: &mut App) {
-        self.shared.tab_size.set(size.into());
+    pub fn set_tab_bar_height(&self, height: Option<Pixels>, cx: &mut App) {
+        self.shared.tab_bar_height.set(height);
         self.shared.notify(cx);
     }
 

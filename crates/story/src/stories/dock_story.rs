@@ -75,7 +75,7 @@ impl super::Story for DockStory {
     }
 
     fn description() -> &'static str {
-        "Drag tabs between groups or towards an edge to split the workspace."
+        "Drag tabs between groups or towards an edge to split the workspace. Tab bars follow rem size; this story also sets an explicit tab bar height."
     }
 
     fn paddings() -> gpui_kit::Pixels {
@@ -138,6 +138,7 @@ impl super::Story for DockStory {
             area.set_dock_collapsible(DockPlacement::Bottom, true, window, cx);
         });
         skin.set_toggle_button_visible(true, cx);
+        skin.set_tab_bar_height(Some(px(36.)), cx);
 
         cx.new(|_| Self {
             dock_area,

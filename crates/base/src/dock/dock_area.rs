@@ -1540,7 +1540,12 @@ impl DockArea {
         // dock keeps a strip so its tab bar stays clickable. Nothing is drawn
         // for a dock with no extent, and the renderer is not asked for chrome
         // nobody can see.
-        let size = dock_extent(&dock);
+        let size = match dock.placement() {
+            DockPlacement::Bottom if !dock.is_open() => {
+                self.renderer.closed_bottom_extent(window, cx)
+            }
+            _ => dock_extent(&dock, window.rem_size()),
+        };
         if size <= px(0.) {
             return Some(div().into_any_element());
         }
@@ -1926,16 +1931,23 @@ impl DockContext {
     }
 }
 
-/// A closed bottom dock keeps this much, so its tab bar stays clickable. A
-/// closed side dock keeps nothing: there is no tab bar left to click at zero
-/// width, and reopening it is the application's to offer.
+/// A closed bottom dock keeps this much at the default 16px rem, so its tab
+/// bar stays clickable. A closed side dock keeps nothing: there is no tab bar
+/// left to click at zero width, and reopening it is the application's to offer.
+/// Prefer [`closed_bottom_strip`] when the window rem is not the default.
 pub const CLOSED_BOTTOM_STRIP: Pixels = px(29.);
 
+/// [`CLOSED_BOTTOM_STRIP`] scaled to the window rem, so a larger type scale
+/// does not clip the tab bar the strip exists to preserve.
+pub fn closed_bottom_strip(rem_size: Pixels) -> Pixels {
+    rem_size * (f32::from(CLOSED_BOTTOM_STRIP) / 16.)
+}
+
 /// How much room a dock asks for along its own axis.
-pub fn dock_extent(dock: &DockContext) -> Pixels {
+pub fn dock_extent(dock: &DockContext, rem_size: Pixels) -> Pixels {
     match (dock.is_open(), dock.placement()) {
         (true, _) => dock.size(),
-        (false, DockPlacement::Bottom) => CLOSED_BOTTOM_STRIP,
+        (false, DockPlacement::Bottom) => closed_bottom_strip(rem_size),
         (false, _) => px(0.),
     }
 }
@@ -2037,6 +2049,14 @@ pub trait DockAreaRenderer: 'static {
         cx: &mut App,
     ) -> AnyElement {
         content
+    }
+
+    /// How tall a closed bottom dock stays so its tab bar remains clickable.
+    ///
+    /// The default follows the window rem. A skin whose tab bar is not the
+    /// rem-scaled default must return a matching strip, or the bar is clipped.
+    fn closed_bottom_extent(&self, window: &mut Window, _: &mut App) -> Pixels {
+        closed_bottom_strip(window.rem_size())
     }
 
     /// The stand-in for a panel this build cannot construct — one whose
@@ -2149,6 +2169,12 @@ mod tests {
 
         let zeroed = [Some(px(0.)), Some(px(0.))];
         assert_eq!(scale_sizes_to(px(800.), &zeroed), zeroed.to_vec());
+    }
+
+    #[test]
+    fn closed_bottom_strip_follows_rem_size() {
+        assert_eq!(closed_bottom_strip(px(16.)), px(29.));
+        assert_eq!(closed_bottom_strip(px(32.)), px(58.));
     }
 
     fn setup(cx: &mut TestAppContext) -> (Entity<DockArea>, &mut VisualTestContext) {

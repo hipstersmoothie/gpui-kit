@@ -77,6 +77,12 @@ impl DockAreaRenderer for DockSkin {
             .into_any_element()
     }
 
+    fn closed_bottom_extent(&self, window: &mut Window, _: &mut App) -> Pixels {
+        // 29px of a 32px tab bar at the default rem. An explicit height uses
+        // the same ratio so the strip still shows the bar instead of clipping it.
+        self.shared.resolved_tab_bar_height(window.rem_size()) * (29. / 32.)
+    }
+
     /// The "unknown panel" message the old `InvalidPanel` drew.
     ///
     /// It answers `dump` with the state it was handed, so a layout written by

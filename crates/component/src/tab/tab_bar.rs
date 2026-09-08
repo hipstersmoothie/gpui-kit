@@ -49,6 +49,8 @@ pub struct TabBar {
     selected_index: Option<usize>,
     variant: TabVariant,
     size: Size,
+    /// Exact outer tab height. Named size still controls padding and type.
+    tab_height: Option<Pixels>,
     menu: bool,
     max_width: Option<Pixels>,
     on_click: Option<Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>>,
@@ -68,6 +70,7 @@ impl TabBar {
             suffix: None,
             variant: TabVariant::default(),
             size: Size::default(),
+            tab_height: None,
             last_empty_space: div().w_3().into_any_element(),
             selected_index: None,
             on_click: None,
@@ -117,6 +120,15 @@ impl TabBar {
     /// overflow menu still shows the full label.
     pub fn max_width(mut self, width: impl Into<Pixels>) -> Self {
         self.max_width = Some(width.into());
+        self
+    }
+
+    /// Set an exact outer tab height in pixels.
+    ///
+    /// Named sizes still pick padding, radius, and type. Omit this to follow
+    /// the rem-scaled height for [`Self::with_size`].
+    pub fn with_tab_height(mut self, height: impl Into<Pixels>) -> Self {
+        self.tab_height = Some(height.into());
         self
     }
 
@@ -239,7 +251,14 @@ impl TabBar {
 
         let variant = self.variant;
         let size = self.size;
-        let inner_height = variant.inner_height(size);
+        let rem_size = window.rem_size();
+        let inner_height = match self.tab_height {
+            Some(height) => {
+                let inset = variant.height(size, rem_size) - variant.inner_height(size, rem_size);
+                (height - inset).max(px(0.))
+            }
+            None => variant.inner_height(size, rem_size),
+        };
         let inner_radius = variant.inner_radius(size, cx);
 
         let indicator = div()
@@ -349,7 +368,6 @@ impl Sizable for TabBar {
 impl RenderOnce for TabBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let default_gap = match self.size {
-            Size::Size(height) => height * 0.375,
             Size::Small | Size::XSmall => px(8.),
             Size::Large => px(16.),
             _ => px(12.),
@@ -369,7 +387,6 @@ impl RenderOnce for TabBar {
             }
             TabVariant::Segmented => {
                 let padding_x = match self.size {
-                    Size::Size(height) => height * 0.125,
                     Size::XSmall => px(2.),
                     Size::Small => px(3.),
                     _ => px(4.),
@@ -385,7 +402,6 @@ impl RenderOnce for TabBar {
             TabVariant::Underline => {
                 // This gap is same as the tab inner_paddings
                 let gap = match self.size {
-                    Size::Size(height) => height * 0.5,
                     Size::XSmall => px(10.),
                     Size::Small => px(12.),
                     Size::Large => px(20.),
@@ -439,7 +455,8 @@ impl RenderOnce for TabBar {
                 .tab_bar_prefix(tab_bar_prefix)
                 .max_width(max_width)
                 .with_variant(self.variant)
-                .with_size(self.size);
+                .with_size(self.size)
+                .height_override(self.tab_height);
             tab.indicator_active = has_indicator;
             tab.indicator_ready = indicator_ready;
             tab.indicator_epoch = indicator_epoch;
